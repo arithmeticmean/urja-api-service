@@ -1,0 +1,46 @@
+services:
+  # Postgres database.
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: urja
+      POSTGRES_PASSWORD: urja
+      POSTGRES_DB: urja
+    ports:
+      - "5432:5432" # only needed to run the service outside Docker (make run)
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U urja -d urja"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  # Creates / updates the tables, then exits.
+  migrate:
+    build: .
+    image: urja-api-service:local
+    command: ["goose", "-dir", "/migrations", "postgres", "postgres://urja:urja@db:5432/urja?sslmode=disable", "up"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  # The API and the background sync.
+  api:
+    build: .
+    image: urja-api-service:local
+    env_file: .env
+    environment:
+      # Inside Docker the database is "db", not localhost.
+      DATABASE_URL: postgres://urja:urja@db:5432/urja?sslmode=disable
+      HTTP_ADDR: ":8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  pgdata:
