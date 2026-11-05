@@ -1,0 +1,607 @@
+{
+    "openapi": "3.0.3",
+    "info": {
+        "title": "Urja Meter API",
+        "version": "1.0.0",
+        "description": "A clean, read-only API over the Urja Meter Ops portal. Data is synced from the portal in the background and served from a local database, so API calls never touch the portal.\n\n- Meters are re-synced every `METER_SYNC_EVERY` (default 1 hour).\n- Each meter's readings are re-fetched every `ENERGY_SYNC_EVERY` (default 1 hour).\n\nSee `PROTOCOL.md` for how the portal works and `ARCHITECTURE.md` for how this service works."
+    },
+    "servers": [
+        {
+            "url": "http://localhost:8080",
+            "description": "Local"
+        }
+    ],
+    "tags": [
+        {
+            "name": "Meters",
+            "description": "Meter details and network position"
+        },
+        {
+            "name": "Readings",
+            "description": "Half-hourly energy readings"
+        },
+        {
+            "name": "Health"
+        }
+    ],
+    "paths": {
+        "/healthz": {
+            "get": {
+                "tags": [
+                    "Health"
+                ],
+                "summary": "Check that the service is running",
+                "operationId": "health",
+                "responses": {
+                    "200": {
+                        "description": "The service is up",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "status": {
+                                            "type": "string",
+                                            "example": "ok"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/meters": {
+            "get": {
+                "tags": [
+                    "Meters"
+                ],
+                "summary": "List meters",
+                "description": "Returns meters ordered by `meterId`. Every filter is an exact match and they can be combined. Any query parameter not listed here returns 400.\n\n**Paging:** pass the `next` value from a response as `after` to get the next page. `next` is `null` on the last page.",
+                "operationId": "listMeters",
+                "parameters": [
+                    {
+                        "$ref": "#/components/parameters/Limit"
+                    },
+                    {
+                        "$ref": "#/components/parameters/After"
+                    },
+                    {
+                        "name": "make",
+                        "in": "query",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "example": "HPL",
+                        "description": "Manufacturer"
+                    },
+                    {
+                        "name": "phaseType",
+                        "in": "query",
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "single",
+                                "three"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "installStatus",
+                        "in": "query",
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "Installed",
+                                "Faulty",
+                                "Decommissioned"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "installType",
+                        "in": "query",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "example": "Whole Current"
+                    },
+                    {
+                        "name": "build",
+                        "in": "query",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "example": "legacy"
+                    },
+                    {
+                        "name": "zone",
+                        "in": "query",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "example": "Z-01",
+                        "description": "Zone code"
+                    },
+                    {
+                        "name": "circle",
+                        "in": "query",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "example": "C-01",
+                        "description": "Circle code"
+                    },
+                    {
+                        "name": "division",
+                        "in": "query",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "example": "D-01",
+                        "description": "Division code"
+                    },
+                    {
+                        "name": "subdivision",
+                        "in": "query",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "example": "SD-01",
+                        "description": "Subdivision code"
+                    },
+                    {
+                        "name": "substation",
+                        "in": "query",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "example": "SS-01",
+                        "description": "Substation code"
+                    },
+                    {
+                        "name": "feeder",
+                        "in": "query",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "example": "F-001",
+                        "description": "Feeder code"
+                    },
+                    {
+                        "name": "dt",
+                        "in": "query",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "example": "DT-007",
+                        "description": "Distribution transformer code"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "A page of meters",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MeterList"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "$ref": "#/components/responses/BadRequest"
+                    },
+                    "500": {
+                        "$ref": "#/components/responses/InternalError"
+                    }
+                }
+            }
+        },
+        "/v1/meters/{id}": {
+            "get": {
+                "tags": [
+                    "Meters"
+                ],
+                "summary": "Get one meter",
+                "operationId": "getMeter",
+                "parameters": [
+                    {
+                        "$ref": "#/components/parameters/MeterId"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The meter",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "data"
+                                    ],
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/components/schemas/Meter"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "$ref": "#/components/responses/NotFound"
+                    },
+                    "500": {
+                        "$ref": "#/components/responses/InternalError"
+                    }
+                }
+            }
+        },
+        "/v1/meters/{id}/readings": {
+            "get": {
+                "tags": [
+                    "Readings"
+                ],
+                "summary": "Get a meter's readings",
+                "description": "Half-hourly readings, oldest first, with `from <= ts < to`. Without `from`/`to` you get everything stored for the meter.\n\n`from` and `to` accept a date (`2026-06-24`, meaning midnight Indian time) or a full timestamp (`2026-06-24T10:00:00+05:30`).",
+                "operationId": "listReadings",
+                "parameters": [
+                    {
+                        "$ref": "#/components/parameters/MeterId"
+                    },
+                    {
+                        "name": "from",
+                        "in": "query",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "example": "2026-06-24",
+                        "description": "Start (inclusive). Date or RFC 3339 timestamp."
+                    },
+                    {
+                        "name": "to",
+                        "in": "query",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "example": "2026-06-25",
+                        "description": "End (exclusive). Date or RFC 3339 timestamp."
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The readings",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ReadingList"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "$ref": "#/components/responses/BadRequest"
+                    },
+                    "404": {
+                        "$ref": "#/components/responses/NotFound"
+                    },
+                    "500": {
+                        "$ref": "#/components/responses/InternalError"
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "parameters": {
+            "MeterId": {
+                "name": "id",
+                "in": "path",
+                "required": true,
+                "schema": {
+                    "type": "string"
+                },
+                "example": "J100000"
+            },
+            "Limit": {
+                "name": "limit",
+                "in": "query",
+                "description": "Meters per page",
+                "schema": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "default": 100
+                }
+            },
+            "After": {
+                "name": "after",
+                "in": "query",
+                "description": "Return meters after this `meterId` (use `next` from the previous page)",
+                "schema": {
+                    "type": "string"
+                },
+                "example": "J100099"
+            }
+        },
+        "responses": {
+            "BadRequest": {
+                "description": "Something in the request is invalid (unknown filter, bad limit, bad date)",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "$ref": "#/components/schemas/Error"
+                        },
+                        "example": {
+                            "error": "unknown filter \"color\""
+                        }
+                    }
+                }
+            },
+            "NotFound": {
+                "description": "No meter with this ID",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "$ref": "#/components/schemas/Error"
+                        },
+                        "example": {
+                            "error": "meter not found"
+                        }
+                    }
+                }
+            },
+            "InternalError": {
+                "description": "Something went wrong on the server",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "$ref": "#/components/schemas/Error"
+                        },
+                        "example": {
+                            "error": "internal error"
+                        }
+                    }
+                }
+            }
+        },
+        "schemas": {
+            "Meter": {
+                "type": "object",
+                "required": [
+                    "meterId",
+                    "serialNo",
+                    "make",
+                    "phaseType",
+                    "installStatus",
+                    "installType",
+                    "build",
+                    "dtCode",
+                    "hierarchy",
+                    "geo"
+                ],
+                "properties": {
+                    "meterId": {
+                        "type": "string",
+                        "example": "J100000"
+                    },
+                    "serialNo": {
+                        "type": "string",
+                        "example": "SE33962"
+                    },
+                    "make": {
+                        "type": "string",
+                        "example": "HPL"
+                    },
+                    "phaseType": {
+                        "type": "string",
+                        "enum": [
+                            "single",
+                            "three"
+                        ]
+                    },
+                    "installStatus": {
+                        "type": "string",
+                        "enum": [
+                            "Installed",
+                            "Faulty",
+                            "Decommissioned"
+                        ]
+                    },
+                    "installType": {
+                        "type": "string",
+                        "example": "Whole Current"
+                    },
+                    "build": {
+                        "type": "string",
+                        "example": "legacy"
+                    },
+                    "dtCode": {
+                        "type": "string",
+                        "example": "DT-001"
+                    },
+                    "hierarchy": {
+                        "$ref": "#/components/schemas/Hierarchy"
+                    },
+                    "geo": {
+                        "$ref": "#/components/schemas/Geo"
+                    }
+                }
+            },
+            "Hierarchy": {
+                "type": "object",
+                "description": "Where the meter sits in the network, from zone down to its distribution transformer.",
+                "required": [
+                    "zone",
+                    "circle",
+                    "division",
+                    "subdivision",
+                    "substation",
+                    "feeder",
+                    "dt"
+                ],
+                "properties": {
+                    "zone": {
+                        "$ref": "#/components/schemas/Node"
+                    },
+                    "circle": {
+                        "$ref": "#/components/schemas/Node"
+                    },
+                    "division": {
+                        "$ref": "#/components/schemas/Node"
+                    },
+                    "subdivision": {
+                        "$ref": "#/components/schemas/Node"
+                    },
+                    "substation": {
+                        "$ref": "#/components/schemas/Node"
+                    },
+                    "feeder": {
+                        "$ref": "#/components/schemas/Node"
+                    },
+                    "dt": {
+                        "$ref": "#/components/schemas/Node"
+                    }
+                }
+            },
+            "Node": {
+                "type": "object",
+                "description": "One level of the hierarchy. `null` where the portal left the value blank.",
+                "required": [
+                    "code",
+                    "name"
+                ],
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "nullable": true,
+                        "example": "Z-01"
+                    },
+                    "name": {
+                        "type": "string",
+                        "nullable": true,
+                        "example": "Jaipur Zone 1"
+                    }
+                }
+            },
+            "Geo": {
+                "type": "object",
+                "required": [
+                    "lat",
+                    "lng"
+                ],
+                "properties": {
+                    "lat": {
+                        "type": "number",
+                        "format": "double",
+                        "example": 26.938961002479868
+                    },
+                    "lng": {
+                        "type": "number",
+                        "format": "double",
+                        "example": 75.83095696146852
+                    }
+                }
+            },
+            "MeterList": {
+                "type": "object",
+                "required": [
+                    "data",
+                    "next"
+                ],
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Meter"
+                        }
+                    },
+                    "next": {
+                        "type": "string",
+                        "nullable": true,
+                        "description": "Pass as `after` to get the next page. `null` on the last page.",
+                        "example": "J100099"
+                    }
+                }
+            },
+            "Reading": {
+                "type": "object",
+                "description": "One half-hourly reading. Numbers are strings so no precision is lost.",
+                "required": [
+                    "ts",
+                    "kwh",
+                    "kvah",
+                    "voltR",
+                    "kwhDelta",
+                    "kvahDelta"
+                ],
+                "properties": {
+                    "ts": {
+                        "type": "string",
+                        "format": "date-time",
+                        "example": "2026-06-24T00:00:00+05:30"
+                    },
+                    "kwh": {
+                        "type": "string",
+                        "description": "Meter total (keeps growing)",
+                        "example": "48439.16"
+                    },
+                    "kvah": {
+                        "type": "string",
+                        "description": "Meter total for apparent energy",
+                        "example": "52314.29"
+                    },
+                    "voltR": {
+                        "type": "string",
+                        "description": "Voltage; empty if the portal didn't send one",
+                        "example": "227"
+                    },
+                    "kwhDelta": {
+                        "type": "string",
+                        "nullable": true,
+                        "description": "Usage in this half hour. `null` for the meter's first reading.",
+                        "example": "0.42"
+                    },
+                    "kvahDelta": {
+                        "type": "string",
+                        "nullable": true,
+                        "description": "Apparent-energy usage in this half hour",
+                        "example": "0.45"
+                    }
+                }
+            },
+            "ReadingList": {
+                "type": "object",
+                "required": [
+                    "meterId",
+                    "data"
+                ],
+                "properties": {
+                    "meterId": {
+                        "type": "string",
+                        "example": "J100000"
+                    },
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Reading"
+                        }
+                    }
+                }
+            },
+            "Error": {
+                "type": "object",
+                "required": [
+                    "error"
+                ],
+                "properties": {
+                    "error": {
+                        "type": "string"
+                    }
+                }
+            }
+        }
+    }
+}
